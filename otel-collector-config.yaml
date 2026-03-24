@@ -1,0 +1,67 @@
+# OTel Collector config for LLM/Agent Observability demo
+# Shows the "batch → redact → export" pattern from the talk.
+#
+# Key design decisions:
+#   1. memory_limiter first — protect the Collector process
+#   2. attributes/redact second — strip PII before batching
+#   3. batch last — efficient export in bulk
+#   4. debug exporter for visibility during the demo
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # 1. Protect the Collector from memory exhaustion
+  memory_limiter:
+    check_interval: 1s
+    limit_mib:      256
+    spike_limit_mib: 64
+
+  # 2. Redact PII before it leaves the app boundary
+  #    Matches the "what to redact by default" slide in the talk
+  attributes/redact:
+    actions:
+      # Authorization headers — delete entirely
+      - key: authorization
+        action: delete
+      # User identity — hash so you can correlate without storing PII
+      - key: user.email
+        action: hash
+      - key: user.id
+        action: hash
+      # Prompt/response payloads — delete (opt-in via OTEL_GENAI_CAPTURE_PAYLOADS)
+      - key: gen_ai.input.messages
+        action: delete
+      - key: gen_ai.output.messages
+        action: delete
+      # Cookie / session tokens
+      - key: http.request.header.cookie
+        action: delete
+
+  # 3. Batch for efficient export
+  batch:
+    timeout:        5s
+    send_batch_size: 512
+
+exporters:
+  # Jaeger via OTLP HTTP
+  otlphttp/jaeger:
+    endpoint: http://jaeger:4318
+    tls:
+      insecure: true
+
+  # Debug output — shows redaction working in Collector logs
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers:  [otlp]
+      processors: [memory_limiter, attributes/redact, batch]
+      exporters:  [otlphttp/jaeger, debug]
