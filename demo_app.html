@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Agent Observability · OpenTelemetry Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #04101A;
+    --bg2: #071521;
+    --bg3: #0A1E2E;
+    --card: #0D2236;
+    --border: #1A3A5C;
+    --border2: #234E67;
+    --accent: #2FD0FF;
+    --orange: #FF9E46;
+    --green: #02C39A;
+    --red: #F95C5C;
+    --yellow: #FFC107;
+    --white: #F4F8FB;
+    --muted: #A7B7C8;
+    --dim: #6F8599;
+    --code: #0D1F30;
+    --font-main: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: var(--font-main);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ─────────────────────────────────────────────────────── */
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 15px; letter-spacing: -0.3px;
+  }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.3)} }
+  .logo-text { color: var(--white); }
+  .logo-text span { color: var(--accent); }
+  .header-tag {
+    font-size: 11px; font-weight: 500; letter-spacing: 0.8px;
+    color: var(--dim); text-transform: uppercase;
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 8px;
+  }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .status-pill {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+    border-radius: 20px; padding: 3px 10px;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .status-pill.running { background: rgba(2,195,154,.15); color: var(--green); border: 1px solid rgba(2,195,154,.3); }
+  .status-pill.running::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 1.5s infinite; }
+
+  /* ── LAYOUT ─────────────────────────────────────────────────────── */
+  .app { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 56px); }
+
+  /* ── LEFT PANEL ─────────────────────────────────────────────────── */
+  .left-panel {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--dim); padding: 16px 20px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Scenarios */
+  .scenarios { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .scenario-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+  }
+  .scenario-btn::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    border-radius: 8px 0 0 8px;
+    background: var(--c, var(--accent));
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .scenario-btn:hover { border-color: var(--border2); background: var(--card); }
+  .scenario-btn:hover::before { opacity: 1; }
+  .scenario-btn.active { border-color: var(--c, var(--accent)); background: var(--card); }
+  .scenario-btn.active::before { opacity: 1; }
+  .scenario-name { font-size: 13px; font-weight: 600; color: var(--white); margin-bottom: 3px; }
+  .scenario-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .scenario-tag {
+    display: inline-block; margin-top: 6px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.4px;
+    padding: 2px 7px; border-radius: 4px;
+    background: rgba(255,255,255,.06); color: var(--c, var(--accent));
+    font-family: var(--font-mono);
+  }
+
+  /* Question input */
+  .question-area { padding: 12px 12px 0; }
+  .question-label { font-size: 11px; color: var(--dim); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+  .question-input {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+    color: var(--white); font-size: 13px; font-family: var(--font-main);
+    resize: none; outline: none; transition: border-color 0.15s;
+  }
+  .question-input:focus { border-color: var(--accent); }
+
+  .fire-btn {
+    margin: 10px 12px 12px;
+    width: calc(100% - 24px);
+    background: var(--accent); color: #04101A;
+    border: none; border-radius: 8px;
+    padding: 11px; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: var(--font-main);
+  }
+  .fire-btn:hover { background: #52DAFF; transform: translateY(-1px); }
+  .fire-btn:active { transform: translateY(0); }
+  .fire-btn:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; transform: none; }
+  .fire-btn svg { transition: transform 0.3s; }
+  .fire-btn:not(:disabled):hover svg { transform: rotate(15deg); }
+
+  /* Metrics sidebar */
+  .metrics-grid {
+    padding: 12px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .metric-card {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .metric-label { font-size: 10px; color: var(--dim); font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 4px; }
+  .metric-value { font-size: 20px; font-weight: 700; font-family: var(--font-mono); }
+  .metric-value.green { color: var(--green); }
+  .metric-value.orange { color: var(--orange); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.accent { color: var(--accent); }
+
+  /* ── RIGHT PANEL ─────────────────────────────────────────────────── */
+  .right-panel { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Tabs */
+  .tabs {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 0; padding: 0 20px;
+  }
+  .tab {
+    padding: 14px 18px; font-size: 13px; font-weight: 500;
+    color: var(--dim); cursor: pointer; transition: all 0.15s;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--muted); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Panels */
+  .tab-content { flex: 1; overflow: hidden; display: none; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* ── TRACE PANEL ─────────────────────────────────────────────────── */
+  .trace-container { flex: 1; overflow-y: auto; padding: 20px; }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--dim); text-align: center; gap: 12px;
+  }
+  .empty-icon { font-size: 48px; opacity: 0.3; }
+  .empty-title { font-size: 16px; font-weight: 500; color: var(--muted); }
+  .empty-sub { font-size: 13px; }
+
+  .trace-header {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .trace-id { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+  .trace-scenario {
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
+    background: rgba(255,255,255,.06); color: var(--white);
+  }
+  .trace-outcome {
+    margin-left: auto; font-size: 12px; font-weight: 600;
+    padding: 4px 12px; border-radius: 20px;
+  }
+  .trace-outcome.ok { background: rgba(2,195,154,.15); color: var(--green); border: 1px solid rgba(2,195,154,.3); }
+  .trace-outcome.warn { background: rgba(255,158,70,.15); color: var(--orange); border: 1px solid rgba(255,158,70,.3); }
+  .trace-outcome.error { background: rgba(249,92,92,.15); color: var(--red); border: 1px solid rgba(249,92,92,.3); }
+
+  /* Waterfall */
+  .waterfall { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .waterfall-header {
+    display: grid; grid-template-columns: 280px 1fr 80px 80px;
+    padding: 10px 16px; background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--dim);
+  }
+  .span-row {
+    display: grid; grid-template-columns: 280px 1fr 80px 80px;
+    padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.04);
+    align-items: center; cursor: pointer; transition: background 0.12s;
+  }
+  .span-row:hover { background: rgba(255,255,255,.03); }
+  .span-row.selected { background: rgba(47,208,255,.05); }
+  .span-row:last-child { border-bottom: none; }
+  .span-name-col { display: flex; align-items: center; gap: 8px; }
+  .span-indent { flex-shrink: 0; }
+  .span-op {
+    font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+    padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+  }
+  .op-agent { background: rgba(47,208,255,.15); color: var(--accent); }
+  .op-retrieval { background: rgba(255,158,70,.15); color: var(--orange); }
+  .op-chat { background: rgba(2,195,154,.15); color: var(--green); }
+  .op-tool { background: rgba(249,92,92,.15); color: var(--red); }
+  .op-policy { background: rgba(255,193,7,.15); color: var(--yellow); }
+  .op-internal { background: rgba(255,255,255,.08); color: var(--muted); }
+  .span-name-text { font-size: 12px; font-family: var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-col { position: relative; height: 20px; }
+  .bar-track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; background: rgba(255,255,255,.06); transform: translateY(-50%); border-radius: 1px; }
+  .bar-fill {
+    position: absolute; top: 50%; height: 8px; transform: translateY(-50%);
+    border-radius: 4px; transition: all 0.6s cubic-bezier(0.4,0,0.2,1);
+  }
+  .span-duration { font-size: 11px; font-family: var(--font-mono); color: var(--muted); text-align: right; }
+  .span-status { text-align: right; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+  .status-dot.ok { background: var(--green); }
+  .status-dot.warn { background: var(--orange); }
+  .status-dot.error { background: var(--red); }
+  .status-dot.blocked { background: var(--yellow); }
+
+  /* Span detail drawer */
+  .span-detail {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+    margin-top: 12px; overflow: hidden;
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .detail-header {
+    padding: 12px 16px; background: var(--code); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .detail-title { font-size: 13px; font-family: var(--font-mono); color: var(--white); font-weight: 500; }
+  .detail-close {
+    margin-left: auto; background: none; border: none; color: var(--dim);
+    cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 4px;
+  }
+  .detail-close:hover { color: var(--white); background: var(--border); }
+  .attrs-grid { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .attr-row { display: flex; gap: 8px; align-items: flex-start; }
+  .attr-key { font-size: 11px; font-family: var(--font-mono); color: var(--dim); min-width: 220px; flex-shrink: 0; }
+  .attr-val {
+    font-size: 11px; font-family: var(--font-mono); color: var(--white);
+    word-break: break-all;
+  }
+  .attr-val.highlight { color: var(--orange); font-weight: 600; }
+  .attr-val.ok { color: var(--green); }
+  .attr-val.error { color: var(--red); }
+  .attr-val.redacted { color: var(--dim); font-style: italic; }
+  .event-badge {
+    margin-top: 10px; padding: 8px 12px; background: rgba(255,193,7,.1);
+    border: 1px solid rgba(255,193,7,.3); border-radius: 6px;
+    font-size: 11px; font-family: var(--font-mono); color: var(--yellow);
+  }
+
+  /* ── LOGS PANEL ─────────────────────────────────────────────────── */
+  .logs-container {
+    flex: 1; overflow-y: auto; padding: 16px;
+    font-family: var(--font-mono); font-size: 12px;
+  }
+  .log-line {
+    display: flex; gap: 12px; padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,.03);
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .log-time { color: var(--dim); flex-shrink: 0; width: 80px; }
+  .log-level { flex-shrink: 0; width: 48px; font-weight: 600; }
+  .log-level.INFO { color: var(--accent); }
+  .log-level.WARN { color: var(--orange); }
+  .log-level.ERROR { color: var(--red); }
+  .log-level.DEBUG { color: var(--dim); }
+  .log-msg { color: var(--muted); flex: 1; }
+  .log-msg .key { color: var(--accent); }
+  .log-msg .val { color: var(--white); }
+  .log-msg .redacted { color: var(--dim); font-style: italic; }
+
+  /* ── COLLECTOR PANEL ─────────────────────────────────────────────── */
+  .collector-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .collector-pipeline {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  .pipeline-header { padding: 12px 16px; background: var(--code); font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--dim); border-bottom: 1px solid var(--border); }
+  .pipeline-stages { display: flex; align-items: center; padding: 16px; gap: 0; }
+  .pipeline-stage {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; text-align: center;
+    position: relative;
+  }
+  .pipeline-stage + .pipeline-stage { margin-left: 32px; }
+  .pipeline-arrow {
+    position: absolute; right: -22px; top: 50%; transform: translateY(-50%);
+    color: var(--border2); font-size: 16px; z-index: 2;
+  }
+  .pipeline-stage-name { font-size: 13px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
+  .pipeline-stage-desc { font-size: 10px; color: var(--dim); }
+  .pipeline-stage.active { border-color: var(--accent); }
+  .pipeline-stage.active .pipeline-stage-name { color: var(--accent); }
+
+  .redaction-log { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .redaction-items { padding: 0; }
+  .redaction-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: 12px; font-family: var(--font-mono);
+    animation: fadeIn 0.3s;
+  }
+  .redaction-item:last-child { border-bottom: none; }
+  .redact-action { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+  .redact-action.DELETE { background: rgba(249,92,92,.15); color: var(--red); }
+  .redact-action.HASH { background: rgba(255,158,70,.15); color: var(--orange); }
+  .redact-field { color: var(--accent); min-width: 220px; }
+  .redact-before { color: var(--red); text-decoration: line-through; opacity: 0.7; }
+  .redact-arrow { color: var(--dim); }
+  .redact-after { color: var(--dim); font-style: italic; }
+
+  /* ── ABOUT PANEL ─────────────────────────────────────────────────── */
+  .about-container { flex: 1; overflow-y: auto; padding: 24px; }
+  .about-section { margin-bottom: 24px; }
+  .about-h2 { font-size: 15px; font-weight: 600; color: var(--white); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .flow-diagram { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin: 8px 0; }
+  .flow-box {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px;
+    font-size: 11px; font-family: var(--font-mono); color: var(--muted);
+  }
+  .flow-box.root { border-color: var(--accent); color: var(--accent); }
+  .flow-box.retrieval { border-color: var(--orange); color: var(--orange); }
+  .flow-box.model { border-color: var(--green); color: var(--green); }
+  .flow-box.tool { border-color: var(--red); color: var(--red); }
+  .flow-arrow { color: var(--dim); margin: 0 6px; font-size: 14px; }
+  .about-p { font-size: 13px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
+  .code-block {
+    background: var(--code); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+    color: var(--muted); overflow-x: auto; margin: 8px 0;
+  }
+  .code-block .kw { color: var(--accent); }
+  .code-block .str { color: var(--green); }
+  .code-block .cm { color: var(--dim); font-style: italic; }
+  .code-block .val { color: var(--orange); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border2); }
+
+  /* Loading animation */
+  .loading-bar {
+    height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 1s infinite;
+    border-radius: 2px;
+  }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 1000;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--white);
+    animation: toastIn 0.3s ease;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  }
+  @keyframes toastIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+
+  /* Scenario answer */
+  .answer-box {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
+  }
+  .answer-label { font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+  .answer-text { font-size: 14px; color: var(--white); line-height: 1.6; }
+  .answer-root-cause {
+    margin-top: 10px; padding: 8px 12px;
+    border-radius: 6px; font-size: 12px; font-weight: 500;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .answer-root-cause.healthy { background: rgba(2,195,154,.1); color: var(--green); border: 1px solid rgba(2,195,154,.2); }
+  .answer-root-cause.warn { background: rgba(255,158,70,.1); color: var(--orange); border: 1px solid rgba(255,158,70,.2); }
+  .answer-root-cause.error { background: rgba(249,92,92,.1); color: var(--red); border: 1px solid rgba(249,92,92,.2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    <div class="logo-text">LLM Agent <span>Observability</span></div>
+  </div>
+  <div class="header-tag">OpenTelemetry · GenAI SemConv</div>
+  <div class="header-right">
+    <div class="status-pill running" id="status-pill">Demo Running</div>
+    <div style="font-size:12px;color:var(--dim);font-family:var(--font-mono)" id="trace-count">0 traces</div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- ── LEFT PANEL ── -->
+  <div class="left-panel">
+    <div class="panel-title">Scenarios</div>
+
+    <div class="scenarios" id="scenarios">
+      <button class="scenario-btn" data-scenario="happy" style="--c:var(--green)" onclick="selectScenario(this)">
+        <div class="scenario-name">Happy path</div>
+        <div class="scenario-desc">Fresh document, correct answer, all spans green</div>
+        <span class="scenario-tag">?scenario=happy</span>
+      </button>
+      <button class="scenario-btn" data-scenario="stale_doc" style="--c:var(--orange)" onclick="selectScenario(this)">
+        <div class="scenario-name">Stale retrieval</div>
+        <div class="scenario-desc">30-day-old doc grounds the answer incorrectly</div>
+        <span class="scenario-tag">?scenario=stale_doc</span>
+      </button>
+      <button class="scenario-btn" data-scenario="tool_error" style="--c:var(--red)" onclick="selectScenario(this)">
+        <div class="scenario-name">Tool timeout</div>
+        <div class="scenario-desc">execute_tool span fails — downstream dependency</div>
+        <span class="scenario-tag">?scenario=tool_error</span>
+      </button>
+      <button class="scenario-btn" data-scenario="prompt_injection" style="--c:var(--yellow)" onclick="selectScenario(this)">
+        <div class="scenario-name">Prompt injection</div>
+        <div class="scenario-desc">Retrieved content hijacks model — policy blocks it</div>
+        <span class="scenario-tag">?scenario=prompt_injection</span>
+      </button>
+      <button class="scenario-btn" data-scenario="latency_spike" style="--c:var(--accent)" onclick="selectScenario(this)">
+        <div class="scenario-name">Latency spike</div>
+        <div class="scenario-desc">Tool dominates tail — alerting not accuracy problem</div>
+        <span class="scenario-tag">?scenario=latency_spike</span>
+      </button>
+    </div>
+
+    <div class="question-area">
+      <div class="question-label">Question</div>
+      <textarea class="question-input" id="question-input" rows="2">Can I change my plan?</textarea>
+    </div>
+
+    <button class="fire-btn" id="fire-btn" onclick="fireRequest()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      Fire Request
+    </button>
+
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Total spans</div>
+        <div class="metric-value accent" id="m-spans">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Errors</div>
+        <div class="metric-value red" id="m-errors">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Avg latency</div>
+        <div class="metric-value orange" id="m-latency">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Tokens used</div>
+        <div class="metric-value green" id="m-tokens">0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('trace', this)">Trace Viewer</div>
+      <div class="tab" onclick="switchTab('logs', this)">Logs</div>
+      <div class="tab" onclick="switchTab('collector', this)">Collector Pipeline</div>
+      <div class="tab" onclick="switchTab('about', this)">Architecture</div>
+    </div>
+
+    <!-- Trace tab -->
+    <div class="tab-content active" id="tab-trace">
+      <div class="trace-container" id="trace-container">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">⟳</div>
+          <div class="empty-title">No traces yet</div>
+          <div class="empty-sub">Select a scenario and fire a request to see the trace waterfall</div>
+        </div>
+        <div id="trace-view" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Logs tab -->
+    <div class="tab-content" id="tab-logs">
+      <div class="logs-container" id="logs-container">
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-level INFO">INFO</span>
+          <span class="log-msg">OTel Collector started · <span class="key">endpoint</span>=<span class="val">0.0.0.0:4318</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-level INFO">INFO</span>
+          <span class="log-msg">Redaction processor loaded · <span class="key">rules</span>=<span class="val">4</span> (delete authorization, hash user.id, hash user.email, delete gen_ai.input.messages)</span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-level INFO">INFO</span>
+          <span class="log-msg">Jaeger exporter ready · <span class="key">endpoint</span>=<span class="val">http://jaeger:4318</span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-time">00:00:00</span>
+          <span class="log-level INFO">INFO</span>
+          <span class="log-msg">FastAPI agent service started · <span class="key">service</span>=<span class="val">llm-agent-demo</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collector tab -->
+    <div class="tab-content" id="tab-collector">
+      <div class="collector-container">
+        <div class="collector-pipeline">
+          <div class="pipeline-header">OTel Collector Pipeline</div>
+          <div class="pipeline-stages">
+            <div class="pipeline-stage active" id="stage-receive">
+              <div class="pipeline-stage-name">Receive</div>
+              <div class="pipeline-stage-desc">OTLP HTTP :4318</div>
+              <span class="pipeline-arrow">›</span>
+            </div>
+            <div class="pipeline-stage" id="stage-redact">
+              <div class="pipeline-stage-name">Redact</div>
+              <div class="pipeline-stage-desc">attributes/redact</div>
+              <span class="pipeline-arrow">›</span>
+            </div>
+            <div class="pipeline-stage" id="stage-batch">
+              <div class="pipeline-stage-name">Batch</div>
+              <div class="pipeline-stage-desc">5s / 512 spans</div>
+              <span class="pipeline-arrow">›</span>
+            </div>
+            <div class="pipeline-stage" id="stage-export">
+              <div class="pipeline-stage-name">Export</div>
+              <div class="pipeline-stage-desc">Jaeger + Debug</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="redaction-log">
+          <div class="pipeline-header">Redaction Activity</div>
+          <div class="redaction-items" id="redaction-items">
+            <div class="redaction-item">
+              <span class="redact-action DELETE">DELETE</span>
+              <span class="redact-field">gen_ai.input.messages</span>
+              <span class="redact-arrow">—</span>
+              <span class="redact-after">off by default (opt-in via OTEL_GENAI_CAPTURE_PAYLOADS)</span>
+            </div>
+            <div class="redaction-item">
+              <span class="redact-action DELETE">DELETE</span>
+              <span class="redact-field">gen_ai.output.messages</span>
+              <span class="redact-arrow">—</span>
+              <span class="redact-after">off by default (opt-in via OTEL_GENAI_CAPTURE_PAYLOADS)</span>
+            </div>
+            <div class="redaction-item">
+              <span class="redact-action DELETE">DELETE</span>
+              <span class="redact-field">http.request.header.cookie</span>
+              <span class="redact-arrow">—</span>
+              <span class="redact-after">always deleted</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- About/Architecture tab -->
+    <div class="tab-content" id="tab-about">
+      <div class="about-container">
+        <div class="about-section">
+          <div class="about-h2">Agent workflow as a trace</div>
+          <div class="about-p">Every user request becomes one trace. Each step is a span. All spans share the same <code style="color:var(--accent);font-family:var(--font-mono)">trace_id</code>.</div>
+          <div class="flow-diagram">
+            <div class="flow-box root">invoke_agent</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box retrieval">retrieval</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box">build_prompt</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box model">chat</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box tool">execute_tool</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box">policy.check</div>
+          </div>
+        </div>
+
+        <div class="about-section">
+          <div class="about-h2">Span code — four hooks</div>
+          <div class="code-block"><span class="cm"># Hook 1 — root span (invoke_agent)</span>
+<span class="kw">with</span> tracer.start_as_current_span(<span class="str">"invoke_agent support-agent"</span>) <span class="kw">as</span> span:
+    span.set_attribute(<span class="str">"gen_ai.operation.name"</span>, <span class="str">"invoke_agent"</span>)
+    span.set_attribute(<span class="str">"gen_ai.agent.name"</span>,     <span class="str">"support-agent"</span>)
+
+    <span class="cm"># Hook 2 — retrieval span</span>
+    ctx = retrieve(scenario)    <span class="cm"># → child span: retrieval kb://...</span>
+
+    <span class="cm"># Hook 3 — model span</span>
+    resp = model_infer(ctx)     <span class="cm"># → child span: chat mock-llm</span>
+
+    <span class="cm"># Hook 4 — tool span</span>
+    tool = tool_call()          <span class="cm"># → child span: execute_tool ticket_api</span></div>
+        </div>
+
+        <div class="about-section">
+          <div class="about-h2">Collector config essence</div>
+          <div class="code-block">processors:
+  attributes/redact:
+    actions:
+      - key: <span class="val">authorization</span>     action: <span class="str">delete</span>
+      - key: <span class="val">user.email</span>         action: <span class="str">hash</span>
+      - key: <span class="val">user.id</span>            action: <span class="str">hash</span>
+      - key: <span class="val">gen_ai.input.messages</span>  action: <span class="str">delete</span>
+  batch:
+    timeout: <span class="val">5s</span>
+    send_batch_size: <span class="val">512</span></div>
+        </div>
+
+        <div class="about-section">
+          <div class="about-h2">Stack</div>
+          <div class="about-p" style="font-family:var(--font-mono);font-size:12px;color:var(--muted);line-height:2">
+            FastAPI app (Python) → OTel SDK → OTLP HTTP → OTel Collector → Jaeger<br>
+            Collector also → Prometheus (metrics) · Loki (logs)<br>
+            Runs fully offline via <span style="color:var(--accent)">docker compose up</span> — no hosted LLM, no internet needed
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+let selectedScenario = 'happy';
+let traceCount = 0;
+let totalErrors = 0;
+let totalTokens = 0;
+let latencies = [];
+let selectedSpanId = null;
+let currentTrace = null;
+
+// ── Scenario data (simulates the FastAPI backend) ───────────────────────
+const SCENARIOS = {
+  happy: {
+    color: '#02C39A',
+    outcome: 'ok',
+    answer: 'You can change your plan at any time according to the current support policy. Just visit your account settings and select the desired plan.',
+    rootCause: 'healthy',
+    question: 'Can I change my plan?',
+    spans: [
+      { id:'s1', op:'invoke_agent', name:'invoke_agent support-agent', depth:0, durationMs:410, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'invoke_agent', 'gen_ai.agent.name':'support-agent',
+          'gen_ai.provider.name':'demo.mock', 'app.scenario':'happy',
+          'user.id':'[HASHED: 8b5c3d9f...]', 'user.email':'[HASHED: 4a7e1b2c...]',
+          'authorization':'[DELETED by Collector]', 'agent.outcome':'healthy'
+        }
+      },
+      { id:'s2', op:'retrieval', name:'retrieval kb://support-policies', depth:1, durationMs:62, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'retrieval', 'gen_ai.provider.name':'demo.mock',
+          'gen_ai.data_source.id':'kb://support-policies',
+          'retrieval.doc_id':'plan-policy-v3', 'retrieval.doc_age_days':'2',
+          'retrieval.score':'0.94', 'retrieval.top_k':'3',
+          'retrieval.content_hash':'a3f9...'
+        },
+        highlight:null
+      },
+      { id:'s3', op:'internal', name:'build_prompt', depth:1, durationMs:5, status:'ok',
+        attrs:{'prompt.template':'support-policy-v2','prompt.context_doc':'plan-policy-v3'}
+      },
+      { id:'s4', op:'chat', name:'chat mock-llm', depth:1, durationMs:158, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'chat','gen_ai.provider.name':'demo.mock',
+          'gen_ai.request.model':'mock-4o-mini',
+          'gen_ai.usage.input_tokens':'312','gen_ai.usage.output_tokens':'94',
+          'gen_ai.response.finish_reason':'stop','llm.temperature':'0.1'
+        }
+      },
+      { id:'s5', op:'tool', name:'execute_tool ticket_api', depth:1, durationMs:95, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'execute_tool','gen_ai.tool.name':'ticket_api',
+          'gen_ai.tool.call.id':'call_7842','downstream.system':'rest'
+        }
+      },
+      { id:'s6', op:'policy', name:'policy.check', depth:1, durationMs:12, status:'ok',
+        attrs:{'policy.blocked':'false','policy.rule':'deny-secret-exfiltration','policy.severity':'none'}
+      }
+    ]
+  },
+
+  stale_doc: {
+    color: '#FF9E46',
+    outcome: 'warn',
+    answer: 'You can change your plan, but you must give 30 days notice before making any changes.',
+    rootCause: 'stale_retrieval',
+    question: 'Can I change my plan?',
+    spans: [
+      { id:'s1', op:'invoke_agent', name:'invoke_agent support-agent', depth:0, durationMs:388, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'invoke_agent','gen_ai.agent.name':'support-agent',
+          'gen_ai.provider.name':'demo.mock','app.scenario':'stale_doc',
+          'user.id':'[HASHED: 8b5c3d9f...]','user.email':'[HASHED: 4a7e1b2c...]',
+          'authorization':'[DELETED by Collector]','agent.outcome':'stale_retrieval',
+          'retrieval.doc_age_days':'30'
+        }
+      },
+      { id:'s2', op:'retrieval', name:'retrieval kb://support-policies', depth:1, durationMs:58, status:'warn',
+        attrs:{
+          'gen_ai.operation.name':'retrieval','gen_ai.provider.name':'demo.mock',
+          'gen_ai.data_source.id':'kb://support-policies',
+          'retrieval.doc_id':'plan-policy-v1',
+          'retrieval.doc_age_days':'30',
+          'retrieval.score':'0.61','retrieval.top_k':'3',
+          'retrieval.content_hash':'b8c2...'
+        },
+        highlight:'retrieval.doc_age_days',
+        note:'⚠️ doc_age_days=30 — this is the root cause. The model received stale context.'
+      },
+      { id:'s3', op:'internal', name:'build_prompt', depth:1, durationMs:5, status:'ok',
+        attrs:{'prompt.template':'support-policy-v2','prompt.context_doc':'plan-policy-v1'}
+      },
+      { id:'s4', op:'chat', name:'chat mock-llm', depth:1, durationMs:149, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'chat','gen_ai.provider.name':'demo.mock',
+          'gen_ai.request.model':'mock-4o-mini',
+          'gen_ai.usage.input_tokens':'298','gen_ai.usage.output_tokens':'87',
+          'gen_ai.response.finish_reason':'stop','llm.temperature':'0.1'
+        }
+      },
+      { id:'s5', op:'policy', name:'policy.check', depth:1, durationMs:11, status:'ok',
+        attrs:{'policy.blocked':'false','policy.rule':'deny-secret-exfiltration','policy.severity':'none'}
+      }
+    ]
+  },
+
+  tool_error: {
+    color: '#F95C5C',
+    outcome: 'error',
+    answer: 'Tool call failed. Unable to complete the request — please retry.',
+    rootCause: 'tool_failure',
+    question: 'What is my ticket status?',
+    spans: [
+      { id:'s1', op:'invoke_agent', name:'invoke_agent support-agent', depth:0, durationMs:342, status:'error',
+        attrs:{
+          'gen_ai.operation.name':'invoke_agent','gen_ai.agent.name':'support-agent',
+          'gen_ai.provider.name':'demo.mock','app.scenario':'tool_error',
+          'user.id':'[HASHED: 8b5c3d9f...]','authorization':'[DELETED by Collector]',
+          'agent.outcome':'tool_failure'
+        }
+      },
+      { id:'s2', op:'retrieval', name:'retrieval kb://support-policies', depth:1, durationMs:60, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'retrieval','retrieval.doc_id':'plan-policy-v3',
+          'retrieval.doc_age_days':'2','retrieval.score':'0.91','retrieval.top_k':'3'
+        }
+      },
+      { id:'s3', op:'internal', name:'build_prompt', depth:1, durationMs:4, status:'ok',
+        attrs:{'prompt.template':'support-policy-v2','prompt.context_doc':'plan-policy-v3'}
+      },
+      { id:'s4', op:'chat', name:'chat mock-llm', depth:1, durationMs:142, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'chat','gen_ai.request.model':'mock-4o-mini',
+          'gen_ai.usage.input_tokens':'305','gen_ai.usage.output_tokens':'91',
+          'gen_ai.response.finish_reason':'stop'
+        }
+      },
+      { id:'s5', op:'tool', name:'execute_tool ticket_api', depth:1, durationMs:5018, status:'error',
+        attrs:{
+          'gen_ai.operation.name':'execute_tool','gen_ai.tool.name':'ticket_api',
+          'gen_ai.tool.call.id':'call_5521','downstream.system':'rest',
+          'error.type':'timeout','tool.retries':'3',
+          'exception.message':'ticket_api timeout after 5s',
+          'exception.type':'RuntimeError'
+        },
+        highlight:'error.type',
+        note:'⚠️ This span is red. Tool timed out after 5s — downstream dependency issue. NOT a prompt problem.'
+      }
+    ]
+  },
+
+  prompt_injection: {
+    color: '#FFC107',
+    outcome: 'warn',
+    answer: 'Request blocked by policy.',
+    rootCause: 'prompt_injection_prevented',
+    question: 'Summarize the policy',
+    spans: [
+      { id:'s1', op:'invoke_agent', name:'invoke_agent support-agent', depth:0, durationMs:148, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'invoke_agent','gen_ai.agent.name':'support-agent',
+          'gen_ai.provider.name':'demo.mock','app.scenario':'prompt_injection',
+          'user.id':'[HASHED: 8b5c3d9f...]','authorization':'[DELETED by Collector]',
+          'agent.outcome':'blocked_by_policy'
+        }
+      },
+      { id:'s2', op:'retrieval', name:'retrieval kb://support-policies', depth:1, durationMs:61, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'retrieval','retrieval.doc_id':'policy-with-malicious-footer',
+          'retrieval.doc_age_days':'1','retrieval.score':'0.83','retrieval.top_k':'3',
+          'retrieval.content_hash':'d4f1...'
+        },
+        note:'⚠️ Retrieved doc contains hostile content — but only its HASH is exported, not the raw content.'
+      },
+      { id:'s3', op:'internal', name:'build_prompt', depth:1, durationMs:5, status:'ok',
+        attrs:{'prompt.template':'support-policy-v2','prompt.context_doc':'policy-with-malicious-footer'}
+      },
+      { id:'s4', op:'policy', name:'policy.check', depth:1, durationMs:18, status:'blocked',
+        attrs:{
+          'policy.blocked':'true','policy.rule':'deny-secret-exfiltration','policy.severity':'high',
+          'detection.type':'retrieval_content_pattern'
+        },
+        event:{name:'prompt_injection_blocked', data:{'policy.rule':'deny-secret-exfiltration','detection.type':'retrieval_content_pattern'}},
+        highlight:'policy.blocked',
+        note:'✓ policy.check blocked the attack. Exported telemetry contains no harmful content — all redacted by Collector.'
+      }
+    ]
+  },
+
+  latency_spike: {
+    color: '#2FD0FF',
+    outcome: 'ok',
+    answer: 'According to the refund policy, you may request a refund within 30 days of purchase.',
+    rootCause: 'slow_tool',
+    question: 'What is the refund policy?',
+    spans: [
+      { id:'s1', op:'invoke_agent', name:'invoke_agent support-agent', depth:0, durationMs:1620, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'invoke_agent','gen_ai.agent.name':'support-agent',
+          'gen_ai.provider.name':'demo.mock','app.scenario':'latency_spike',
+          'user.id':'[HASHED: 8b5c3d9f...]','authorization':'[DELETED by Collector]',
+          'agent.outcome':'slow_tool','retrieval.doc_age_days':'2'
+        }
+      },
+      { id:'s2', op:'retrieval', name:'retrieval kb://support-policies', depth:1, durationMs:262, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'retrieval','retrieval.doc_id':'plan-policy-v3',
+          'retrieval.doc_age_days':'2','retrieval.score':'0.92','retrieval.top_k':'3'
+        }
+      },
+      { id:'s3', op:'internal', name:'build_prompt', depth:1, durationMs:6, status:'ok',
+        attrs:{'prompt.template':'support-policy-v2','prompt.context_doc':'plan-policy-v3'}
+      },
+      { id:'s4', op:'chat', name:'chat mock-llm', depth:1, durationMs:448, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'chat','gen_ai.request.model':'mock-4o-mini',
+          'gen_ai.usage.input_tokens':'318','gen_ai.usage.output_tokens':'103',
+          'gen_ai.response.finish_reason':'stop'
+        }
+      },
+      { id:'s5', op:'tool', name:'execute_tool ticket_api', depth:1, durationMs:904, status:'ok',
+        attrs:{
+          'gen_ai.operation.name':'execute_tool','gen_ai.tool.name':'ticket_api',
+          'gen_ai.tool.call.id':'call_3391','downstream.system':'rest'
+        },
+        highlight:null,
+        note:'⚠️ This span takes 904ms — dominating the p95 tail. Retrieval and model are healthy. This is an SLO/alerting problem, not an accuracy problem.'
+      },
+      { id:'s6', op:'policy', name:'policy.check', depth:1, durationMs:11, status:'ok',
+        attrs:{'policy.blocked':'false','policy.rule':'deny-secret-exfiltration','policy.severity':'none'}
+      }
+    ]
+  }
+};
+
+const OP_COLORS = {
+  invoke_agent: { cls:'op-agent', bar:'#2FD0FF' },
+  retrieval:    { cls:'op-retrieval', bar:'#FF9E46' },
+  chat:         { cls:'op-chat', bar:'#02C39A' },
+  execute_tool: { cls:'op-tool', bar:'#F95C5C' },
+  policy:       { cls:'op-policy', bar:'#FFC107' },
+  internal:     { cls:'op-internal', bar:'#6F8599' }
+};
+
+function statusDot(status) {
+  return `<span class="status-dot ${status}"></span>`;
+}
+
+// ── Select scenario ──────────────────────────────────────────────────
+function selectScenario(btn) {
+  document.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedScenario = btn.dataset.scenario;
+  const sc = SCENARIOS[selectedScenario];
+  const qInput = document.getElementById('question-input');
+  if (sc.question) qInput.value = sc.question;
+  selectedSpanId = null;
+}
+
+// ── Fire request ─────────────────────────────────────────────────────
+async function fireRequest() {
+  const btn = document.getElementById('fire-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<div class="loading-bar" style="width:80px;height:3px"></div>Processing...`;
+
+  // Animate collector pipeline
+  animatePipeline();
+
+  // Simulate processing time
+  await sleep(180 + Math.random() * 200);
+
+  const sc = SCENARIOS[selectedScenario];
+  const traceId = randomHex(16);
+  traceCount++;
+  totalTokens += parseInt(sc.spans.find(s => s.op === 'chat')?.attrs?.['gen_ai.usage.input_tokens'] || 0) +
+                 parseInt(sc.spans.find(s => s.op === 'chat')?.attrs?.['gen_ai.usage.output_tokens'] || 0);
+  latencies.push(sc.spans[0].durationMs);
+  if (sc.outcome === 'error') totalErrors++;
+
+  currentTrace = { traceId, scenario: selectedScenario, sc };
+
+  // Update metrics
+  updateMetrics();
+
+  // Render trace
+  renderTrace(traceId, sc, selectedScenario);
+
+  // Add logs
+  addLogs(traceId, sc, selectedScenario);
+
+  // Add redaction items
+  addRedactionItems(sc, selectedScenario, traceId);
+
+  // Switch to trace tab
+  document.querySelector('.tab').click();
+  switchTab('trace', document.querySelector('.tab'));
+
+  await sleep(400);
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Fire Request`;
+
+  document.getElementById('trace-count').textContent = `${traceCount} trace${traceCount !== 1 ? 's' : ''}`;
+
+  showToast(sc.outcome === 'error' ? '⚠ Error trace — click spans to inspect' :
+            sc.outcome === 'warn' ? '⚡ Warning — check highlighted span' :
+            '✓ Trace complete');
+}
+
+function renderTrace(traceId, sc, scenarioKey) {
+  document.getElementById('empty-state').style.display = 'none';
+  const view = document.getElementById('trace-view');
+  view.style.display = 'block';
+  selectedSpanId = null;
+
+  const totalMs = sc.spans[0].durationMs;
+  const outcomeLabel = sc.outcome === 'error' ? 'Tool failure' :
+                       sc.outcome === 'warn' ? (scenarioKey === 'stale_doc' ? 'Stale retrieval' :
+                                                 scenarioKey === 'prompt_injection' ? 'Injection blocked' : 'Warning') :
+                       scenarioKey === 'latency_spike' ? 'Slow tool (p95)' : 'Healthy';
+
+  // Answer box
+  let answerHtml = `
+    <div class="answer-box">
+      <div class="answer-label">Agent response</div>
+      <div class="answer-text">${sc.answer}</div>
+      <div class="answer-root-cause ${sc.outcome === 'error' ? 'error' : sc.outcome === 'warn' ? 'warn' : 'healthy'}">
+        ${sc.outcome === 'error' ? '✗' : sc.outcome === 'warn' ? '⚠' : '✓'} 
+        root_cause = ${sc.rootCause}
+      </div>
+    </div>
+  `;
+
+  // Trace header
+  let headerHtml = `
+    <div class="trace-header">
+      <div class="trace-id">trace_id: ${traceId}</div>
+      <div class="trace-scenario">${scenarioKey}</div>
+      <div style="font-size:12px;color:var(--dim)">duration: ${totalMs}ms</div>
+      <div class="trace-outcome ${sc.outcome}">${outcomeLabel}</div>
+    </div>
+  `;
+
+  // Waterfall
+  let wfHtml = `
+    <div class="waterfall">
+      <div class="waterfall-header">
+        <div>Span</div>
+        <div>Timeline</div>
+        <div>Duration</div>
+        <div>Status</div>
+      </div>
+  `;
+
+  // Calculate relative start times (simulate overlap)
+  let cumulativeMs = 0;
+  const spanStarts = {};
+  spanStarts['s1'] = 0;
+  sc.spans.forEach((span, i) => {
+    if (i === 0) return;
+    const prevDepth0 = sc.spans.find(s => s.id === 's1');
+    // Child spans are nested within parent
+    spanStarts[span.id] = cumulativeMs + 15;
+    if (i === 1) cumulativeMs += span.durationMs + 8;
+    else if (i < sc.spans.length - 1) cumulativeMs += span.durationMs + 5;
+  });
+
+  sc.spans.forEach((span, i) => {
+    const opInfo = OP_COLORS[span.op] || OP_COLORS.internal;
+    const indent = span.depth * 20;
+    const barLeft = span.depth === 0 ? 0 : (spanStarts[span.id] / totalMs * 100);
+    const barWidth = (span.durationMs / totalMs * 100);
+    const isHighlighted = span.status !== 'ok';
+
+    wfHtml += `
+      <div class="span-row ${isHighlighted ? 'highlighted' : ''}" 
+           id="span-row-${span.id}" 
+           onclick="selectSpan('${span.id}', '${scenarioKey}')">
+        <div class="span-name-col">
+          <div class="span-indent" style="width:${indent}px;flex-shrink:0"></div>
+          ${i > 0 ? '<div style="width:16px;flex-shrink:0;color:var(--border2);font-size:12px;margin-right:4px">└</div>' : ''}
+          <span class="span-op ${opInfo.cls}">${span.op}</span>
+          <span class="span-name-text">${span.name.replace(span.op + ' ', '')}</span>
+        </div>
+        <div class="bar-col">
+          <div class="bar-track"></div>
+          <div class="bar-fill" 
+               style="left:${barLeft.toFixed(1)}%;width:${Math.max(barWidth,1).toFixed(1)}%;background:${
+                 span.status === 'error' ? '#F95C5C' :
+                 span.status === 'warn' ? '#FF9E46' :
+                 span.status === 'blocked' ? '#FFC107' :
+                 opInfo.bar};${span.durationMs > 800 ? 'animation:shimmer 1.5s infinite' : ''}">
+          </div>
+        </div>
+        <div class="span-duration">${span.durationMs}ms</div>
+        <div class="span-status">${statusDot(span.status)}</div>
+      </div>
+    `;
+  });
+
+  wfHtml += '</div>';
+
+  view.innerHTML = answerHtml + headerHtml + wfHtml + '<div id="span-detail-container"></div>';
+}
+
+function selectSpan(spanId, scenarioKey) {
+  const sc = SCENARIOS[scenarioKey];
+  const span = sc.spans.find(s => s.id === spanId);
+  if (!span) return;
+
+  // Toggle
+  if (selectedSpanId === spanId) {
+    selectedSpanId = null;
+    document.getElementById('span-detail-container').innerHTML = '';
+    document.querySelectorAll('.span-row').forEach(r => r.classList.remove('selected'));
+    return;
+  }
+
+  selectedSpanId = spanId;
+  document.querySelectorAll('.span-row').forEach(r => r.classList.remove('selected'));
+  document.getElementById('span-row-' + spanId)?.classList.add('selected');
+
+  const opInfo = OP_COLORS[span.op] || OP_COLORS.internal;
+
+  let attrsHtml = '';
+  Object.entries(span.attrs).forEach(([k, v]) => {
+    const isHighlighted = k === span.highlight;
+    const isRedacted = v.toString().includes('[HASHED') || v.toString().includes('[DELETED');
+    let valClass = isHighlighted ? 'highlight' : isRedacted ? 'redacted' : 
+                   (v === 'true' || v === 'stop' || v === 'false') ? 
+                   (v === 'true' && k.includes('blocked') ? 'error' : v === 'false' && k.includes('blocked') ? 'ok' : '') : '';
+    attrsHtml += `
+      <div class="attr-row">
+        <span class="attr-key">${k}</span>
+        <span class="attr-val ${valClass}">${v}</span>
+      </div>
+    `;
+  });
+
+  let eventHtml = '';
+  if (span.event) {
+    eventHtml = `
+      <div class="event-badge">
+        event: ${span.event.name}<br>
+        ${Object.entries(span.event.data).map(([k,v]) => `${k}=${v}`).join(' · ')}
+      </div>
+    `;
+  }
+
+  let noteHtml = '';
+  if (span.note) {
+    noteHtml = `
+      <div style="margin:0 16px 12px;padding:10px 12px;background:rgba(255,158,70,.08);border:1px solid rgba(255,158,70,.25);border-radius:6px;font-size:12px;color:var(--orange);line-height:1.5">
+        ${span.note}
+      </div>
+    `;
+  }
+
+  const container = document.getElementById('span-detail-container');
+  container.innerHTML = `
+    <div class="span-detail">
+      <div class="detail-header">
+        <span class="span-op ${opInfo.cls}" style="font-size:11px">${span.op}</span>
+        <span class="detail-title">${span.name}</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--dim)">${span.durationMs}ms</span>
+        <button class="detail-close" onclick="document.getElementById('span-detail-container').innerHTML='';selectedSpanId=null;document.querySelectorAll('.span-row').forEach(r=>r.classList.remove('selected'))">×</button>
+      </div>
+      ${noteHtml}
+      <div class="attrs-grid">
+        ${attrsHtml}
+        ${eventHtml}
+      </div>
+    </div>
+  `;
+
+  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function addLogs(traceId, sc, scenarioKey) {
+  const container = document.getElementById('logs-container');
+  const now = new Date().toTimeString().slice(0,8);
+  const shortTrace = traceId.slice(0,8) + '...';
+
+  const lines = [
+    { level:'INFO', msg:`Request received · <span class="key">trace_id</span>=<span class="val">${shortTrace}</span> · <span class="key">scenario</span>=<span class="val">${scenarioKey}</span>` },
+    { level:'INFO', msg:`<span class="key">invoke_agent</span> span opened · <span class="key">agent</span>=<span class="val">support-agent</span>` },
+    { level:'INFO', msg:`<span class="key">retrieval</span> span · <span class="key">doc_id</span>=<span class="val">${sc.spans.find(s=>s.op==='retrieval')?.attrs?.['retrieval.doc_id']||'—'}</span> · <span class="key">doc_age_days</span>=<span class="${scenarioKey==='stale_doc'?'val" style="color:var(--orange)':'val'}">${sc.spans.find(s=>s.op==='retrieval')?.attrs?.['retrieval.doc_age_days']||'—'}</span>` },
+  ];
+
+  if (scenarioKey === 'stale_doc') {
+    lines.push({ level:'WARN', msg:`<span class="key">retrieval.doc_age_days</span>=<span class="val">30</span> — stale context detected` });
+  }
+  if (scenarioKey === 'tool_error') {
+    lines.push({ level:'ERROR', msg:`<span class="key">execute_tool ticket_api</span> · timeout after 5s · retries=3` });
+  }
+  if (scenarioKey === 'prompt_injection') {
+    lines.push({ level:'WARN', msg:`<span class="key">policy.check</span> BLOCKED · rule=deny-secret-exfiltration · event=prompt_injection_blocked` });
+  }
+  if (scenarioKey === 'latency_spike') {
+    lines.push({ level:'WARN', msg:`<span class="key">execute_tool ticket_api</span> slow · <span class="key">duration</span>=<span class="val">904ms</span> — p95 alert threshold 500ms` });
+  }
+
+  lines.push({ level:'INFO', msg:`Collector: redacting · <span class="key">authorization</span>=<span class="redacted">[DELETED]</span> · <span class="key">user.id</span>=<span class="redacted">[HASHED]</span>` });
+  lines.push({ level:'DEBUG', msg:`Span batch exported · <span class="key">spans</span>=<span class="val">${sc.spans.length}</span> · <span class="key">dest</span>=<span class="val">jaeger:4318</span>` });
+
+  lines.forEach(line => {
+    const el = document.createElement('div');
+    el.className = 'log-line';
+    el.innerHTML = `<span class="log-time">${now}</span><span class="log-level ${line.level}">${line.level}</span><span class="log-msg">${line.msg}</span>`;
+    container.appendChild(el);
+  });
+  container.scrollTop = container.scrollHeight;
+}
+
+function addRedactionItems(sc, scenarioKey, traceId) {
+  const container = document.getElementById('redaction-items');
+  const now = new Date().toTimeString().slice(0,8);
+
+  const newItems = [
+    { action:'DELETE', field:'authorization', before:'Bearer demo-token', after:'[deleted]' },
+    { action:'HASH', field:'user.id', before:'user-12345', after:'8b5c3d9f...' },
+    { action:'HASH', field:'user.email', before:'user@example.com', after:'4a7e1b2c...' },
+  ];
+
+  newItems.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'redaction-item';
+    el.innerHTML = `
+      <span class="redact-action ${item.action}">${item.action}</span>
+      <span class="redact-field">${item.field}</span>
+      <span class="redact-before">${item.before}</span>
+      <span class="redact-arrow">→</span>
+      <span class="redact-after">${item.after}</span>
+    `;
+    container.appendChild(el);
+  });
+}
+
+function animatePipeline() {
+  const stages = ['receive','redact','batch','export'];
+  stages.forEach((s, i) => {
+    setTimeout(() => {
+      document.querySelectorAll('.pipeline-stage').forEach(el => el.classList.remove('active'));
+      document.getElementById('stage-' + s).classList.add('active');
+    }, i * 150);
+  });
+}
+
+function updateMetrics() {
+  const sc = SCENARIOS[selectedScenario];
+  const chatSpan = sc.spans.find(s => s.op === 'chat');
+  const tokens = parseInt(chatSpan?.attrs?.['gen_ai.usage.input_tokens'] || 0) +
+                 parseInt(chatSpan?.attrs?.['gen_ai.usage.output_tokens'] || 0);
+  totalTokens = (parseInt(document.getElementById('m-tokens').textContent) || 0) + tokens;
+
+  const totalSpans = parseInt(document.getElementById('m-spans').textContent || '0') + sc.spans.length;
+  const avgLat = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length) : 0;
+
+  document.getElementById('m-spans').textContent = totalSpans;
+  document.getElementById('m-errors').textContent = totalErrors;
+  document.getElementById('m-latency').textContent = avgLat ? avgLat + 'ms' : '—';
+  document.getElementById('m-tokens').textContent = totalTokens;
+}
+
+// ── Tab switching ────────────────────────────────────────────────────
+function switchTab(tabName, tabEl) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  if (tabEl) tabEl.classList.add('active');
+  document.getElementById('tab-' + tabName).classList.add('active');
+}
+
+// ── Toast ────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ── Utils ────────────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function randomHex(n) {
+  return Array.from({length:n}, () => Math.floor(Math.random()*16).toString(16)).join('');
+}
+
+// Auto-select happy scenario
+document.querySelector('.scenario-btn').classList.add('active');
+</script>
+</body>
+</html>
